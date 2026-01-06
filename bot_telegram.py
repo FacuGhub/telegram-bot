@@ -22,7 +22,9 @@ logging.basicConfig(
         logging.StreamHandler() #Sigue mostrando en consola
         ]
 )
-
+logging.getLogger("httpx").setLevel(logging.ERROR)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.INFO)    # opcional
 #------------
 #FUNCION DEDICADA A PARSEAR Y VALIDAR
 #------------
