@@ -5,7 +5,9 @@ import requests #type: ignore
 from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
+from dotenv import load_dotenv
 
+load_dotenv() # Lee .env si existe (no rome en Docker)
 #------------------------------------------
 #CONFIGURACION
 #------------------------------------------
@@ -15,7 +17,7 @@ if not TOKEN:
     raise RuntimeError("No se encontró TELEGRAM_TOKEN")
 
 # ✅ URL NUEVA DEL FORM (ACTUALIZALA)
-FORM_URL = "https://docs.google.com/forms/u/0/d/e/1FAIpQLSckmPBAGBwWg07PNL5y31nH9nnYsd6BdUOFUBfHQMAFFRpRuw/formResponse"
+FORM_URL = os.getenv("FORM_URL", "").strip()
 
 #CONFIGURAR LOGGIN PARA VER ERRORES Y ACTIVIDAD DEL BOT
 logging.basicConfig(
@@ -53,6 +55,8 @@ def parsear_mensaje(texto_raw: str) -> dict:
     # FECHA: DD-MM-YY
     if not re.fullmatch(r"\d{2}-\d{2}-\d{2}", fecha_txt):
         raise ValueError("FECHA_FORMATO")
+    if not re.fullmatch(r"\d+", cantidad.strip()):
+        raise ValueError("CANTIDAD_FORMATO")
 
     try:
         fecha_obj = datetime.strptime(fecha_txt, "%d-%m-%y")
@@ -61,16 +65,18 @@ def parsear_mensaje(texto_raw: str) -> dict:
 
     # Obligatorios no vacíos
     for key, val in {
-        "CAPACITADOR", capacitador,
-        "CADENA", cadena,
-        "ZONA", zona,
-        "DIRECCION", direccion,
-        "CANTIDAD", cantidad,
-        "VENDEDORES", vendedores_txt,
+        "CAPACITADOR": capacitador,
+        "CADENA": cadena,
+        "ZONA": zona,
+        "DIRECCION": direccion,
+        "CANTIDAD": cantidad,
+        "VENDEDORES": vendedores_txt,
     }.items():
         if not val.strip():
             raise ValueError(f"VACIO_{key}")
-
+    if not re.fullmatch(r"\d+", cantidad.strip()):
+        raise ValueError("CANTIDAD_FORMATO")
+    
     # Normalizar vendedores (acepta coma o punto y coma)
     vendedores = ", ".join(
         [x.strip() for x in re.split(r"[;,]", vendedores_txt) if x.strip()]
