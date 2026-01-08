@@ -9,9 +9,13 @@ from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filte
 #------------------------------------------
 #CONFIGURACION
 #------------------------------------------
+
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     raise RuntimeError("No se encontró TELEGRAM_TOKEN")
+
+# ✅ URL NUEVA DEL FORM (ACTUALIZALA)
+FORM_URL = "https://docs.google.com/forms/u/0/d/e/1FAIpQLSckmPBAGBwWg07PNL5y31nH9nnYsd6BdUOFUBfHQMAFFRpRuw/formResponse"
 
 #CONFIGURAR LOGGIN PARA VER ERRORES Y ACTIVIDAD DEL BOT
 logging.basicConfig(
@@ -25,14 +29,16 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.ERROR)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.INFO)    # opcional
+
 #------------
 #FUNCION DEDICADA A PARSEAR Y VALIDAR
 #------------
+
 def parsear_mensaje(texto_raw: str) -> dict:
     lineas = [l.strip() for l in texto_raw.splitlines() if l.strip() != ""]
 
-    # Permitimos 6 o 7 líneas (comentarios opcional)
-    if len(lineas) not in (6, 7):
+    # Permitimos 7 u 8 líneas (comentarios opcional)
+    if len(lineas) not in (7, 8):
         raise ValueError("FORMATO")
 
     fecha_txt = lineas[0]
@@ -40,8 +46,9 @@ def parsear_mensaje(texto_raw: str) -> dict:
     cadena = lineas[2]
     zona = lineas[3]
     direccion = lineas[4]
-    vendedores_txt = lineas[5]
-    comentarios = lineas[6] if len(lineas) == 7 else ""
+    cantidad = lineas[5]
+    vendedores_txt = lineas[6]
+    comentarios = lineas[7] if len(lineas) == 8 else ""
 
     # FECHA: DD-MM-YY
     if not re.fullmatch(r"\d{2}-\d{2}-\d{2}", fecha_txt):
@@ -53,13 +60,14 @@ def parsear_mensaje(texto_raw: str) -> dict:
         raise ValueError("FECHA_INVALIDA")
 
     # Obligatorios no vacíos
-    for key, val in [
+    for key, val in {
         "CAPACITADOR", capacitador,
         "CADENA", cadena,
         "ZONA", zona,
         "DIRECCION", direccion,
+        "CANTIDAD", cantidad,
         "VENDEDORES", vendedores_txt,
-    ].items():
+    }.items():
         if not val.strip():
             raise ValueError(f"VACIO_{key}")
 
@@ -76,11 +84,10 @@ def parsear_mensaje(texto_raw: str) -> dict:
         "cadena": cadena.strip(),
         "zona": zona.strip(),
         "direccion": direccion.strip(),
+        "cantidad": cantidad.strip(),
         "vendedores": vendedores,
         "comentarios": comentarios.strip(),
     }
-
-FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScJzeA90GKlk4W5Qk9XQVq6kryb7votrKMKIkmBKXseJ53mlQ/formResponse"
 
 def enviar_a_forms(datos: dict):
     if not FORM_URL:
@@ -88,13 +95,14 @@ def enviar_a_forms(datos: dict):
         return
     
     payload = {
-        "entry.1360873299": datos["fecha"],
-        "entry.1342155568": datos["capacitador"],
-        "entry.630205433": datos["cadena"],
-        "entry.1393272027": datos["zona"],
-        "entry.1604947929": datos["direccion"],
-        "entry.1922485007": datos["vendedores"],
-        "entry.1489803757": datos["comentarios"],
+        "entry.728470323": datos["fecha"],
+        "entry.1492019641": datos["capacitador"],
+        "entry.1011740523": datos["cadena"],
+        "entry.959735072": datos["zona"],
+        "entry.1569623492": datos["direccion"],
+        "entry.1326869635": datos["cantidad"],
+        "entry.1441118373": datos["vendedores"],
+        "entry.1960523388": datos["comentarios"],
     }
 
     response = requests.post(FORM_URL, data=payload, timeout=10)
@@ -118,6 +126,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Cadena: {datos['cadena']}\n"
             f"Zona: {datos['zona']}\n"
             f"Dirección: {datos['direccion']}\n"
+            f"Cantidad: {datos['cantidad']}\n"
             f"Vendedores: {datos['vendedores']}\n"
             f"Comentarios: {datos['comentarios'] or '-'}"
         )
@@ -127,10 +136,11 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "FORMATO": "Debes enviar 6 o 7 líneas.",
             "FECHA_FORMATO": "La fecha debe ser DD-MM-YY.",
             "FECHA_INVALIDA": "La fecha no es válida.",
-            "VACIO_CAPACITADOR": "Falta el capacitador.",
+            "VACIO_CAPACITADOR": "Falta el nombre del capacitador.",
             "VACIO_CADENA": "Falta la cadena.",
             "VACIO_ZONA": "Falta la zona.",
             "VACIO_DIRECCION": "Falta la dirección.",
+            "VACIO_CANTIDAD": "Falta la cantidad.",
             "VACIO_VENDEDORES": "Faltan vendedores.",
         }
         await update.message.reply_text(errores.get(str(e), "Error de validación."))
