@@ -57,7 +57,7 @@ def init_db() -> None:
 
 
 def add_comment(user_id: int, text: str) -> int:
-    now = datetime.now(datetime).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute(
