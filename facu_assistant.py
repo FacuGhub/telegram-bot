@@ -165,15 +165,37 @@ def enviar_a_forms(datos: dict):
     response.raise_for_status()
 
 # -------------------------------------------------
-# HANDLER
+# HANDLERS
 # -------------------------------------------------
     
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        # 1) Parsear/validar primero
         datos = parsear_mensaje(update.message.text)
         logging.info("Registro validado: %s", datos)
 
-        enviar_a_forms(datos)
+        # 2) Modo test: NO enviar a Forms
+        test_mode = context.user_data.get("test_mode", False)
+        sent_to_forms = 0
+        forms_error = None
+
+        if test_mode:
+            logging.info("Modo test activado: NO se envía a Google Forms")
+        else:
+            try:
+                enviar_a_forms(datos)
+                sent_to_forms = 1
+            except Exception as e:
+                forms_error = str(e)
+                logging.exception("Error enviando a Google Forms")
+        # 3) Responder al usuario (siempre)
+        extra = ""
+        if test_mode:
+            extra = "\n\n🧪 Modo test: NO se envió a Google Forms."
+        elif sent_to_forms == 1:
+            extra = "\n\n📤 Enviado a Google Forms: Sí"
+        else:
+            extra = f"\n\n📤 Enviado a Google Forms: No\n⚠️ Error: {forms_error}"
 
         await update.message.reply_text(
             "✅ Registro cargado correctamente:\n"
@@ -186,10 +208,11 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Vendedores: {datos['vendedores']}\n"
             f"Comentarios: {datos['comentarios'] or '-'}"
         )
+        # 4) (Próximo paso) Guardar en DB training con is_test/sent_to_forms/forms_error
 
     except ValueError as e:
         errores = {
-            "FORMATO": "Debes enviar 6 o 7 líneas.",
+            "FORMATO": "Debes enviar 6 o 7 líneas (Comentarios opcional).",
             "FECHA_FORMATO": "La fecha debe ser DD-MM-YY.",
             "FECHA_INVALIDA": "La fecha no es válida.",
             "VACIO_CAPACITADOR": "Falta el nombre del capacitador.",
@@ -197,9 +220,11 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "VACIO_ZONA": "Falta la zona.",
             "VACIO_DIRECCION": "Falta la dirección.",
             "VACIO_CANTIDAD": "Falta la cantidad.",
+            "CANTIDAD_FORMATO": "Cantidad debe ser solo números.",
             "VACIO_VENDEDORES": "Faltan vendedores.",
         }
         await update.message.reply_text(errores.get(str(e), "Error de validación."))
+        
     except Exception:
         logging.exception("Error inesperado")
         await update.message.reply_text("❌ Error interno del bot.")
@@ -247,6 +272,31 @@ async def cmd_comentarios(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logging.exception("Unhandled error", exc_info=context.error)
 
+#---------Agregamos Handler de modo DEV/TEST---------
+
+async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+
+    arg = (context.args[0].lower() if context.args else "").strip()
+
+    if arg in ("on", "true", "1", "si", "sí"):
+        context.user_data["test_mode"] = True
+    elif arg in ("off", "false", "0", "no"):
+        context.user_data["test_mode"] = False
+    elif arg == "":
+        pass
+    else:
+        await update.message.reply_text("Usá: /test on | /test off | /test")
+        return
+
+    enabled = context.user_data.get("test_mode", False)
+    await update.message.reply_text(
+        f"🧪 Modo test: {'ACTIVADO' if enabled else 'DESACTIVADO'}\n"
+        + ("(No se enviará nada a Google Forms)" if enabled else "(Se enviará a Google Forms)")
+    )
+
+
 #------------------------------------------------
 # Main: iniciar el bot
 #------------------------------------------------
@@ -256,6 +306,7 @@ def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("comentario", cmd_comentario))
     app.add_handler(CommandHandler("comentarios", cmd_comentarios))
+    app.add_handler(CommandHandler("test", cmd_test))
     app.add_error_handler(on_error)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
     logging.info("Bot iniciado correctamente")
