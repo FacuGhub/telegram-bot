@@ -2,9 +2,11 @@ import os
 import re
 import logging
 import requests #type: ignore
+import sqlite3
 from datetime import datetime
+from pathlib import Path
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, CommandHandler, filters
 from dotenv import load_dotenv
 
 load_dotenv() # Lee .env si existe (no rome en Docker)
@@ -16,7 +18,11 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     raise RuntimeError("No se encontró TELEGRAM_TOKEN")
 
-# ✅ URL NUEVA DEL FORM (ACTUALIZALA)
+# DB Path
+
+DB_PATH = os.environ.get("DB_PATH", "/data/app.db")
+
+# ✅ URL
 FORM_URL = os.getenv("FORM_URL", "").strip()
 
 #CONFIGURAR LOGGIN PARA VER ERRORES Y ACTIVIDAD DEL BOT
@@ -31,6 +37,49 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.ERROR)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.INFO)    # opcional
+
+#-------Agregando DB-----------
+
+def init_db() -> None:
+    Path(os.path.dirname(DB_PATH)).mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            text TEXT NOT NULL
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+
+def add_comment(user_id: int, text: str) -> int:
+    now = datetime.now(datetime).isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO comments (created_at, user_id, text) VALUES (?, ?, ?)",
+        (now, user_id, text),
+    )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return int(new_id)
+
+
+def get_last_comments(user_id: int, limit: int = 10) -> list[tuple[int, str, str]]:
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, created_at, text FROM comments WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+        (user_id, limit),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
 
 #------------
 #FUNCION DEDICADA A PARSEAR Y VALIDAR
@@ -154,6 +203,45 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.exception("Error inesperado")
         await update.message.reply_text("❌ Error interno del bot.")
 
+#--------Agregamos handlers de comentarios----------
+
+async def cmd_comentario(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    text = " ".join(context.args).strip()
+    if not text:
+        await update.message.reply_text("Usá: /comentario <texto>")
+        return
+
+    user_id = update.effective_user.id
+    new_id = add_comment(user_id, text)
+    await update.message.reply_text(f"✅ Guardado (#{new_id}).")
+
+
+async def cmd_comentarios(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    user_id = update.effective_user.id
+
+    limit = 10
+    if context.args:
+        try:
+            limit = max(1, min(50, int(context.args[0])))
+        except ValueError:
+            await update.message.reply_text("Usá: /comentarios [N] (ej: /comentarios 20)")
+            return
+
+    rows = get_last_comments(user_id, limit)
+    if not rows:
+        await update.message.reply_text("No hay comentarios guardados.")
+        return
+
+    lines = []
+    for cid, created_at, text in rows:
+        short = text if len(text) <= 80 else text[:77] + "..."
+        lines.append(f"#{cid} — {short}")
+
+    await update.message.reply_text("🗒 Últimos comentarios:\n" + "\n".join(lines))
 
 #------------------------------------------------
 # Main: iniciar el bot
@@ -163,8 +251,10 @@ def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
     logging.info("Bot iniciado correctamente")
+    init_db()
+    app.add_handler(CommandHandler("comentario", cmd_comentario))
+    app.add_handler(CommandHandler("comentarios", cmd_comentarios))
     app.run_polling()
 
 if __name__ == "__main__":
     main()
-        

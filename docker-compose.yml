@@ -1,5 +1,10 @@
 services:
   facu-assistant:
     container_name: facu-assistant
+    image: facu-assistant:latest
     build: .
     restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data    
