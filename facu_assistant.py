@@ -3,12 +3,13 @@ import re
 import logging
 import requests #type: ignore
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, CommandHandler, filters
 from dotenv import load_dotenv
 
+now = datetime.now(timezone.utc).isoformat()
 load_dotenv() # Lee .env si existe (no rome en Docker)
 #------------------------------------------
 #CONFIGURACION
@@ -243,17 +244,21 @@ async def cmd_comentarios(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("🗒 Últimos comentarios:\n" + "\n".join(lines))
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logging.exception("Unhandled error", exc_info=context.error)
+
 #------------------------------------------------
 # Main: iniciar el bot
 #------------------------------------------------
 
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
-    logging.info("Bot iniciado correctamente")
     init_db()
+    app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("comentario", cmd_comentario))
     app.add_handler(CommandHandler("comentarios", cmd_comentarios))
+    app.add_error_handler(on_error)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
+    logging.info("Bot iniciado correctamente")
     app.run_polling()
 
 if __name__ == "__main__":
