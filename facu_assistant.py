@@ -52,9 +52,30 @@ def init_db() -> None:
             text TEXT NOT NULL
         );
     """)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS trainings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+
+        fecha TEXT NOT NULL,
+        capacitador TEXT NOT NULL,
+        cadena TEXT NOT NULL,
+        zona TEXT NOT NULL,
+        direccion TEXT NOT NULL,
+        cantidad INTEGER NOT NULL,
+        vendedores TEXT NOT NULL,
+        comentarios TEXT,
+
+        is_test INTEGER NOT NULL DEFAULT 0,
+        sent_to_forms INTEGER NOT NULL DEFAULT 0,
+        forms_error TEXT
+        );
+    """)
     conn.commit()
     conn.close()
 
+# Agregamos que guarde los comentarios y los numere
 
 def add_comment(user_id: int, text: str) -> int:
     now = datetime.now(timezone.utc).isoformat()
@@ -81,6 +102,46 @@ def get_last_comments(user_id: int, limit: int = 10) -> list[tuple[int, str, str
     conn.close()
     return rows
 
+# Agregamos que guarde los datos recopilados
+
+def save_training(
+    user_id: int,
+    datos: dict,
+    is_test: bool,
+    sent_to_forms: int,
+    forms_error: str | None
+) -> int:
+    now = datetime.now(timezone.utc).isoformat()
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO trainings
+        (created_at, user_id, fecha, capacitador, cadena, zona, direccion, cantidad, vendedores, comentarios,
+         is_test, sent_to_forms, forms_error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            now,
+            user_id,
+            datos["fecha"],
+            datos["capacitador"],
+            datos["cadena"],
+            datos["zona"],
+            datos["direccion"],
+            int(datos["cantidad"]),
+            datos["vendedores"],
+            datos["comentarios"],
+            1 if is_test else 0,
+            int(sent_to_forms),
+            forms_error,
+        ),
+    )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return int(new_id)
 
 #------------
 #FUNCION DEDICADA A PARSEAR Y VALIDAR
@@ -197,6 +258,20 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             extra = f"\n\n📤 Enviado a Google Forms: No\n⚠️ Error: {forms_error}"
 
+        # 4) Guardar en DB training con is_test/sent_to_forms/forms_error (Antes de responder)
+
+        user_id = update.effective_user.id
+        training_id = save_training(
+            user_id=user_id,
+            datos=datos,
+            is_test=test_mode,
+            sent_to_forms=sent_to_forms,
+            forms_error=forms_error,
+        )
+        extra = f"\n🗃️ Guardado en DB (ID #{training_id})." + extra
+
+        # 5) Responde al usuario
+        
         await update.message.reply_text(
             "✅ Registro cargado correctamente:\n"
             f"Fecha: {datos['fecha']}\n"
@@ -208,8 +283,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Vendedores: {datos['vendedores']}\n"
             f"Comentarios: {datos['comentarios'] or '-'}"
         )
-        # 4) (Próximo paso) Guardar en DB training con is_test/sent_to_forms/forms_error
-
+        
     except ValueError as e:
         errores = {
             "FORMATO": "Debes enviar 6 o 7 líneas (Comentarios opcional).",
